@@ -1,375 +1,167 @@
 import sqlite3
-import csv
-import os
-import random
-from datetime import datetime, timedelta
+import datetime
 
-# --- CONFIGURAÇÃO INICIAL ---
-DB_FILE = "agritech.db"
-CSV_FILES = {
-    "produtores.csv": [
-        ["ID_Produtor", "Nome", "CPF_CNPJ", "Email"],
-        [1, "João da Silva", "111.222.333-44", "joao.silva@email.com"],
-        [2, "Maria Oliveira", "555.666.777-88", "maria.oliveira@email.com"],
-        [3, "Pedro Souza", "999.888.777-66", "pedro.souza@email.com"],
-    ],
-    "areas.csv": [
-        ["ID_Area", "ID_Produtor", "Nome_Identificador", "Localizacao_Geografica", "Tamanho_Hectares"],
-        [101, 1, "Talhão Norte", "-23.5505,-46.6333", 50.5],
-        [102, 1, "Talhão Sul", "-23.5612,-46.6411", 75.0],
-        [103, 2, "Setor A", "-22.9068,-43.1729", 120.2],
-    ],
-    "culturas.csv": [
-        ["ID_Cultura", "Nome_Popular", "Nome_Cientifico", "PH_Ideal_Min", "PH_Ideal_Max", "Umidade_Ideal_Min", "Umidade_Ideal_Max"],
-        [1, "Soja", "Glycine max", 6.0, 7.0, 60, 75],
-        [2, "Milho", "Zea mays", 5.8, 6.8, 55, 70],
-        [3, "Algodão", "Gossypium hirsutum", 6.0, 6.5, 50, 65],
-    ],
-    "sensores.csv": [
-        ["ID_Sensor", "ID_Area", "Tipo_Sensor", "Data_Instalacao", "Status"],
-        [1001, 101, "Umidade", "2023-01-15", "Ativo"],
-        [1002, 101, "pH", "2023-01-15", "Ativo"],
-        [1003, 101, "Nutrientes", "2023-01-16", "Ativo"],
-        [2001, 103, "Umidade", "2023-02-20", "Manutenção"],
-    ]
-}
+# Conectar ao banco (arquivo local SQLite)
+conn = sqlite3.connect('farmtech.db')
+cursor = conn.cursor()
 
-# --- FUNÇÕES DE SETUP DO BANCO DE DADOS ---
+# Criação das tabelas
+cursor.execute('''
+CREATE TABLE IF NOT EXISTS Plantacao (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    nome TEXT NOT NULL,
+    localizacao TEXT NOT NULL
+)
+''')
 
-def criar_arquivos_csv():
-    """Cria os arquivos CSV de exemplo se eles não existirem."""
-    print("Verificando arquivos CSV...")
-    for filename, data in CSV_FILES.items():
-        if not os.path.exists(filename):
-            print(f"Criando arquivo de exemplo: {filename}")
-            try:
-                with open(filename, 'w', newline='', encoding='utf-8') as f:
-                    writer = csv.writer(f)
-                    writer.writerows(data)
-            except IOError as e:
-                print(f"Erro ao criar {filename}: {e}")
-                
-def conectar_bd():
-    """Conecta ao banco de dados SQLite e retorna a conexão."""
-    try:
-        conn = sqlite3.connect(DB_FILE)
-        conn.execute("PRAGMA foreign_keys = ON;") # Habilita o suporte a chaves estrangeiras
-        return conn
-    except sqlite3.Error as e:
-        print(f"Erro ao conectar ao banco de dados: {e}")
-        return None
+cursor.execute('''
+CREATE TABLE IF NOT EXISTS Sensor (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    tipo TEXT NOT NULL,
+    id_plantacao INTEGER NOT NULL,
+    FOREIGN KEY (id_plantacao) REFERENCES Plantacao(id)
+)
+''')
 
-def criar_tabelas(conn):
-    """Cria as tabelas do banco de dados com base no MER."""
-    cursor = conn.cursor()
-    
-    # Dicionário com todos os comandos CREATE TABLE
-    comandos_sql = {
-        "PRODUTOR": """
-            CREATE TABLE IF NOT EXISTS PRODUTOR (
-                ID_Produtor INTEGER PRIMARY KEY,
-                Nome TEXT NOT NULL,
-                CPF_CNPJ TEXT NOT NULL UNIQUE,
-                Email TEXT UNIQUE
-            );
-        """,
-        "AREA_PLANTIO": """
-            CREATE TABLE IF NOT EXISTS AREA_PLANTIO (
-                ID_Area INTEGER PRIMARY KEY,
-                ID_Produtor INTEGER,
-                Nome_Identificador TEXT,
-                Localizacao_Geografica TEXT,
-                Tamanho_Hectares REAL,
-                FOREIGN KEY (ID_Produtor) REFERENCES PRODUTOR (ID_Produtor) ON DELETE CASCADE
-            );
-        """,
-        "CULTURA": """
-            CREATE TABLE IF NOT EXISTS CULTURA (
-                ID_Cultura INTEGER PRIMARY KEY,
-                Nome_Popular TEXT NOT NULL UNIQUE,
-                Nome_Cientifico TEXT,
-                PH_Ideal_Min REAL,
-                PH_Ideal_Max REAL,
-                Umidade_Ideal_Min REAL,
-                Umidade_Ideal_Max REAL
-            );
-        """,
-        "PLANTIO": """
-            CREATE TABLE IF NOT EXISTS PLANTIO (
-                ID_Plantio INTEGER PRIMARY KEY AUTOINCREMENT,
-                ID_Area INTEGER,
-                ID_Cultura INTEGER,
-                Data_Inicio_Plantio DATE NOT NULL,
-                Data_Fim_Colheita DATE,
-                FOREIGN KEY (ID_Area) REFERENCES AREA_PLANTIO (ID_Area) ON DELETE CASCADE,
-                FOREIGN KEY (ID_Cultura) REFERENCES CULTURA (ID_Cultura)
-            );
-        """,
-        "SENSOR": """
-            CREATE TABLE IF NOT EXISTS SENSOR (
-                ID_Sensor INTEGER PRIMARY KEY,
-                ID_Area INTEGER,
-                Tipo_Sensor TEXT NOT NULL,
-                Data_Instalacao DATE,
-                Status TEXT,
-                FOREIGN KEY (ID_Area) REFERENCES AREA_PLANTIO (ID_Area) ON DELETE CASCADE
-            );
-        """,
-        "LEITURA_SENSOR": """
-            CREATE TABLE IF NOT EXISTS LEITURA_SENSOR (
-                ID_Leitura INTEGER PRIMARY KEY AUTOINCREMENT,
-                ID_Sensor INTEGER,
-                Data_Hora_Leitura TIMESTAMP NOT NULL,
-                Valor_Umidade REAL,
-                Valor_pH REAL,
-                Valor_Fosforo_P REAL,
-                Valor_Potassio_K REAL,
-                FOREIGN KEY (ID_Sensor) REFERENCES SENSOR (ID_Sensor) ON DELETE CASCADE
-            );
-        """,
-        "ACAO_SISTEMA": """
-            CREATE TABLE IF NOT EXISTS ACAO_SISTEMA (
-                ID_Acao INTEGER PRIMARY KEY AUTOINCREMENT,
-                ID_Area INTEGER,
-                Data_Hora_Recomendacao TIMESTAMP NOT NULL,
-                Tipo_Acao TEXT,
-                Quantidade_Recomendada REAL,
-                Unidade_Medida TEXT,
-                Status_Acao TEXT,
-                FOREIGN KEY (ID_Area) REFERENCES AREA_PLANTIO (ID_Area) ON DELETE CASCADE
-            );
-        """
-    }
+cursor.execute('''
+CREATE TABLE IF NOT EXISTS Leitura (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    id_sensor INTEGER NOT NULL,
+    data_hora TEXT NOT NULL,
+    valor REAL NOT NULL,
+    FOREIGN KEY (id_sensor) REFERENCES Sensor(id)
+)
+''')
 
-    print("Criando tabelas...")
-    for nome_tabela, sql in comandos_sql.items():
-        try:
-            cursor.execute(sql)
-            # print(f"Tabela {nome_tabela} criada com sucesso ou já existente.")
-        except sqlite3.Error as e:
-            print(f"Erro ao criar tabela {nome_tabela}: {e}")
+conn.commit()
 
+# Funções CRUD
+def inserir_plantacao():
+    nome = input("Nome da plantação: ")
+    local = input("Localização: ")
+    cursor.execute('INSERT INTO Plantacao (nome, localizacao) VALUES (?, ?)', (nome, local))
     conn.commit()
+    print("🌱 Plantação cadastrada com sucesso!")
 
-
-def popular_tabelas(conn):
-    """Popula as tabelas a partir dos arquivos CSV."""
-    cursor = conn.cursor()
-
-    # Mapeamento de arquivos para tabelas e colunas
-    mapa_populacao = {
-        "produtores.csv": ("PRODUTOR", ["ID_Produtor", "Nome", "CPF_CNPJ", "Email"]),
-        "areas.csv": ("AREA_PLANTIO", ["ID_Area", "ID_Produtor", "Nome_Identificador", "Localizacao_Geografica", "Tamanho_Hectares"]),
-        "culturas.csv": ("CULTURA", ["ID_Cultura", "Nome_Popular", "Nome_Cientifico", "PH_Ideal_Min", "PH_Ideal_Max", "Umidade_Ideal_Min", "Umidade_Ideal_Max"]),
-        "sensores.csv": ("SENSOR", ["ID_Sensor", "ID_Area", "Tipo_Sensor", "Data_Instalacao", "Status"]),
-    }
-
-    print("Populando tabelas com dados iniciais...")
-    for filename, (tabela, colunas) in mapa_populacao.items():
-        try:
-            # Verifica se a tabela já tem dados
-            cursor.execute(f"SELECT COUNT(*) FROM {tabela}")
-            if cursor.fetchone()[0] > 0:
-                # print(f"Tabela {tabela} já populada. Pulando.")
-                continue
-
-            with open(filename, 'r', encoding='utf-8') as f:
-                reader = csv.reader(f)
-                next(reader)  # Pula o cabeçalho
-                for linha in reader:
-                    placeholders = ', '.join(['?'] * len(colunas))
-                    sql = f"INSERT INTO {tabela} ({', '.join(colunas)}) VALUES ({placeholders})"
-                    cursor.execute(sql, linha)
-            # print(f"Dados de {filename} inseridos em {tabela}.")
-        except FileNotFoundError:
-            print(f"Erro: Arquivo {filename} não encontrado.")
-        except sqlite3.IntegrityError as e:
-            print(f"Erro de integridade ao inserir em {tabela} (dados duplicados?): {e}")
-        except sqlite3.Error as e:
-            print(f"Erro de SQL ao popular tabela {tabela}: {e}")
-
+def inserir_sensor():
+    tipo = input("Tipo de sensor (umidade, pH, nutrientes): ")
+    listar_plantacoes()
+    id_plantacao = int(input("ID da plantação: "))
+    cursor.execute('INSERT INTO Sensor (tipo, id_plantacao) VALUES (?, ?)', (tipo, id_plantacao))
     conn.commit()
+    print("🛰️ Sensor cadastrado com sucesso!")
 
+def inserir_leitura():
+    listar_sensores()
+    id_sensor = int(input("ID do sensor: "))
+    valor = float(input("Valor da leitura: "))
+    data_hora = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    cursor.execute('INSERT INTO Leitura (id_sensor, data_hora, valor) VALUES (?, ?, ?)', (id_sensor, data_hora, valor))
+    conn.commit()
+    print("📊 Leitura registrada com sucesso!")
 
-# --- FUNÇÕES CRUD (CRIAR, LER, ATUALIZAR, DELETAR) ---
+def listar_plantacoes():
+    cursor.execute('SELECT * FROM Plantacao')
+    plantacoes = cursor.fetchall()
+    print("\n🌾 Plantações:")
+    for p in plantacoes:
+        print(p)
 
-def adicionar_leitura_sensor():
-    """Adiciona uma nova leitura de sensor simulada."""
-    conn = conectar_bd()
-    if not conn: return
-    
-    id_sensor = input("Digite o ID do sensor para adicionar a leitura: ")
-    try:
-        cursor = conn.cursor()
-        cursor.execute("SELECT Tipo_Sensor FROM SENSOR WHERE ID_Sensor = ?", (id_sensor,))
-        resultado = cursor.fetchone()
-        if not resultado:
-            print(f"Erro: Sensor com ID {id_sensor} não encontrado.")
-            return
+def listar_sensores():
+    cursor.execute('SELECT * FROM Sensor')
+    sensores = cursor.fetchall()
+    print("\n🛰️ Sensores:")
+    for s in sensores:
+        print(s)
 
-        tipo_sensor = resultado[0]
-        data_hora = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        valores = {'Valor_Umidade': None, 'Valor_pH': None, 'Valor_Fosforo_P': None, 'Valor_Potassio_K': None}
+def listar_leituras():
+    cursor.execute('SELECT * FROM Leitura')
+    leituras = cursor.fetchall()
+    print("\n📊 Leituras:")
+    for l in leituras:
+        print(l)
 
-        if tipo_sensor == 'Umidade':
-            valores['Valor_Umidade'] = round(random.uniform(40, 90), 2)
-        elif tipo_sensor == 'pH':
-            valores['Valor_pH'] = round(random.uniform(5.0, 8.0), 2)
-        elif tipo_sensor == 'Nutrientes':
-            valores['Valor_Fosforo_P'] = round(random.uniform(10, 50), 2)
-            valores['Valor_Potassio_K'] = round(random.uniform(20, 80), 2)
+def atualizar_plantacao():
+    listar_plantacoes()
+    idp = int(input("ID da plantação a atualizar: "))
+    nome = input("Novo nome: ")
+    local = input("Nova localização: ")
+    cursor.execute('UPDATE Plantacao SET nome=?, localizacao=? WHERE id=?', (nome, local, idp))
+    conn.commit()
+    print("✅ Plantação atualizada!")
 
-        sql = """
-            INSERT INTO LEITURA_SENSOR (ID_Sensor, Data_Hora_Leitura, Valor_Umidade, Valor_pH, Valor_Fosforo_P, Valor_Potassio_K)
-            VALUES (?, ?, ?, ?, ?, ?)
-        """
-        cursor.execute(sql, (id_sensor, data_hora, valores['Valor_Umidade'], valores['Valor_pH'], valores['Valor_Fosforo_P'], valores['Valor_Potassio_K']))
-        conn.commit()
-        print(f"Leitura para o sensor {id_sensor} adicionada com sucesso!")
-
-    except sqlite3.Error as e:
-        print(f"Erro ao adicionar leitura: {e}")
-    finally:
-        conn.close()
-
-def consultar_dados(query, params=()):
-    """Função genérica para realizar consultas SELECT e exibir os resultados."""
-    conn = conectar_bd()
-    if not conn: return
-
-    try:
-        cursor = conn.cursor()
-        cursor.execute(query, params)
-        resultados = cursor.fetchall()
-        
-        if not resultados:
-            print("Nenhum resultado encontrado.")
-            return
-
-        # Pega os nomes das colunas
-        nomes_colunas = [description[0] for description in cursor.description]
-        print("\n--- RESULTADO DA CONSULTA ---")
-        print(" | ".join(nomes_colunas))
-        print("-" * (sum(len(col) for col in nomes_colunas) + 3 * len(nomes_colunas)))
-        
-        for linha in resultados:
-            print(" | ".join(map(str, linha)))
-        print("---------------------------\n")
-
-    except sqlite3.Error as e:
-        print(f"Erro na consulta: {e}")
-    finally:
-        conn.close()
-
-def manipular_dados(query, params=()):
-    """Função genérica para operações INSERT, UPDATE, DELETE."""
-    conn = conectar_bd()
-    if not conn: return False
-
-    try:
-        cursor = conn.cursor()
-        cursor.execute(query, params)
-        conn.commit()
-        print("Operação realizada com sucesso!")
-        return True
-    except sqlite3.IntegrityError as e:
-        print(f"Erro de integridade: {e}. (Possível chave estrangeira não existente ou valor único duplicado).")
-        return False
-    except sqlite3.Error as e:
-        print(f"Erro na operação: {e}")
-        return False
-    finally:
-        conn.close()
-
-def atualizar_status_sensor():
-    """Atualiza o status de um sensor específico."""
-    id_sensor = input("Digite o ID do sensor que deseja atualizar: ")
-    novo_status = input("Digite o novo status (Ex: Ativo, Inativo, Manutenção): ")
-    
-    query = "UPDATE SENSOR SET Status = ? WHERE ID_Sensor = ?"
-    manipular_dados(query, (novo_status, id_sensor))
+def remover_plantacao():
+    listar_plantacoes()
+    idp = int(input("ID da plantação a remover: "))
+    cursor.execute('DELETE FROM Plantacao WHERE id=?', (idp,))
+    conn.commit()
+    print("🗑️ Plantação removida!")
 
 def remover_sensor():
-    """Remove um sensor e suas leituras associadas (via ON DELETE CASCADE)."""
-    try:
-        id_sensor = int(input("Digite o ID do sensor que deseja remover: "))
-        confirmacao = input(f"Tem certeza que deseja remover o sensor {id_sensor} e todas as suas leituras? (s/n): ")
-        if confirmacao.lower() == 's':
-            query = "DELETE FROM SENSOR WHERE ID_Sensor = ?"
-            manipular_dados(query, (id_sensor,))
-        else:
-            print("Operação cancelada.")
-    except ValueError:
-        print("ID inválido. Por favor, digite um número.")
+    listar_sensores()
+    ids = int(input("ID do sensor a remover: "))
+    cursor.execute('DELETE FROM Sensor WHERE id=?', (ids,))
+    conn.commit()
+    print("🗑️ Sensor removido!")
 
+def remover_leitura():
+    listar_leituras()
+    idl = int(input("ID da leitura a remover: "))
+    cursor.execute('DELETE FROM Leitura WHERE id=?', (idl,))
+    conn.commit()
+    print("🗑️ Leitura removida!")
 
-# --- FUNÇÕES DE MENU ---
-
-def menu_consultas():
-    print("\n--- MENU DE CONSULTAS ---")
-    print("1. Listar todos os produtores")
-    print("2. Listar todas as áreas de plantio de um produtor")
-    print("3. Listar todos os sensores de uma área")
-    print("4. Ver leituras de um sensor específico")
-    print("0. Voltar ao menu principal")
-    
-    escolha = input("Escolha uma opção: ")
-    return escolha
-
-def menu_principal():
-    print("\n===== SIMULADOR DE BANCO DE DADOS AGRITECH =====")
-    print("1. Consultar dados")
-    print("2. Adicionar leitura de sensor (simulado)")
-    print("3. Atualizar status de um sensor")
-    print("4. Remover um sensor")
-    print("0. Sair")
-    
-    escolha = input("Escolha uma opção: ")
-    return escolha
-
-
-# --- LÓGICA PRINCIPAL ---
-
-def main():
-    """Função principal que executa o programa."""
-    criar_arquivos_csv()
-    conn = conectar_bd()
-    if conn:
-        criar_tabelas(conn)
-        popular_tabelas(conn)
-        conn.close()
-    else:
-        print("Não foi possível inicializar o banco de dados. Encerrando.")
-        return
-
+# Menu principal
+def menu():
     while True:
-        escolha = menu_principal()
-        if escolha == '1':
-            while True:
-                sub_escolha = menu_consultas()
-                if sub_escolha == '1':
-                    consultar_dados("SELECT * FROM PRODUTOR;")
-                elif sub_escolha == '2':
-                    id_produtor = input("Digite o ID do produtor: ")
-                    consultar_dados("SELECT ID_Area, Nome_Identificador, Tamanho_Hectares FROM AREA_PLANTIO WHERE ID_Produtor = ?", (id_produtor,))
-                elif sub_escolha == '3':
-                    id_area = input("Digite o ID da área: ")
-                    consultar_dados("SELECT ID_Sensor, Tipo_Sensor, Status FROM SENSOR WHERE ID_Area = ?", (id_area,))
-                elif sub_escolha == '4':
-                    id_sensor = input("Digite o ID do sensor: ")
-                    consultar_dados("SELECT Data_Hora_Leitura, Valor_Umidade, Valor_pH, Valor_Fosforo_P, Valor_Potassio_K FROM LEITURA_SENSOR WHERE ID_Sensor = ? ORDER BY Data_Hora_Leitura DESC LIMIT 10", (id_sensor,))
-                elif sub_escolha == '0':
-                    break
-                else:
-                    print("Opção inválida.")
-        elif escolha == '2':
-            adicionar_leitura_sensor()
-        elif escolha == '3':
-            atualizar_status_sensor()
-        elif escolha == '4':
+        print("""
+======== 🌱 MENU FARMTECH 🌱 ========
+1. Inserir Plantação
+2. Inserir Sensor
+3. Inserir Leitura
+
+4. Listar Plantações
+5. Listar Sensores
+6. Listar Leituras
+
+7. Atualizar Plantação
+
+8. Remover Plantação
+9. Remover Sensor
+10. Remover Leitura
+
+0. Sair
+""")
+        opcao = input("Escolha uma opção: ")
+
+        if opcao == '1':
+            inserir_plantacao()
+        elif opcao == '2':
+            inserir_sensor()
+        elif opcao == '3':
+            inserir_leitura()
+        elif opcao == '4':
+            listar_plantacoes()
+        elif opcao == '5':
+            listar_sensores()
+        elif opcao == '6':
+            listar_leituras()
+        elif opcao == '7':
+            atualizar_plantacao()
+        elif opcao == '8':
+            remover_plantacao()
+        elif opcao == '9':
             remover_sensor()
-        elif escolha == '0':
-            print("Encerrando o programa. Até mais!")
+        elif opcao == '10':
+            remover_leitura()
+        elif opcao == '0':
+            print("🌾 Encerrando o programa.")
             break
         else:
-            print("Opção inválida. Tente novamente.")
+            print("⚠️ Opção inválida!")
+
+# Executa o menu
+menu()
+
+# Fecha conexão no final
+conn.close()
