@@ -1,138 +1,120 @@
 #include <DHT.h>
 #include <DHT_U.h>
-
 #include "Wire.h"
 #include "LiquidCrystal_I2C.h"
 
-#define DHTPIN 13       // Pino digital ao qual o sensor DHT22 está conectado
-#define DHTTYPE DHT22   // Tipo de sensor DHT22
+const uint8_t DHTPIN = 13;
+const uint8_t RELAY_PIN = 19;
+const uint8_t PH_PIN = 34;
+const uint8_t K_PIN = 12;  // Potássio
+const uint8_t P_PIN = 27;  // Fósforo
 
-#define RELAY_PIN 19    // Pino digital ao qual o relé está conectado
+#define DHTTYPE DHT22
 
-#define pH 34    // Pino digital no qual o sensor LDR para pH está conectado
-
-#define K 12        // Pino no qual o botao para detecção de Potassio (K)
-#define P 27        // Pino no qual o botao para detecção de Fosforo (P)
-
-LiquidCrystal_I2C lcd = LiquidCrystal_I2C(0x27, 16, 2); // Change to (0x27,20,4) for 20x4 LCD.
+LiquidCrystal_I2C lcd = LiquidCrystal_I2C(0x27, 16, 2);
 
 DHT_Unified dht(DHTPIN, DHTTYPE);
 
-unsigned long delayMS;
+unsigned long previousMillis = 0; 
+const long interval = 2000;
 
 void setup() {
   Serial.begin(115200);
-// Initiate the LCD:
+
   lcd.init();
-  lcd.backlight();  
+  lcd.backlight();
+  lcd.setCursor(0, 0);
+  lcd.print("FarmTech v4.0");
+  lcd.setCursor(0, 1);
+  lcd.print("Iniciando...");
   
-  Serial.println("DHT22 test!");
-
   dht.begin();
-  sensor_t sensor;
-  dht.temperature().getSensor(&sensor);
-  dht.humidity().getSensor(&sensor);
   
-  pinMode(K, INPUT_PULLUP);
-  pinMode(P, INPUT_PULLUP);
-
-  pinMode(RELAY_PIN, OUTPUT); 
+  pinMode(K_PIN, INPUT_PULLUP);
+  pinMode(P_PIN, INPUT_PULLUP);
+  pinMode(RELAY_PIN, OUTPUT);
   digitalWrite(RELAY_PIN, LOW);
 
- 
-  // Define um atraso entre as leituras do sensor
-  delayMS = sensor.min_delay / 36000;
+  delay(2000);
+  lcd.clear();
 }
 
 void loop() {
-  // Atraso entre as medições
-  delay(delayMS);
- 
-  // Obtém um novo evento de sensores
+  // 1. Leitura de Umidade e Temperatura (DHT22)
   sensors_event_t event;
-
-  // Lê a umidade
   dht.humidity().getEvent(&event);
-  if (isnan(event.relative_humidity)) {
+  
+  float umidade = event.relative_humidity;
+  
+  if (isnan(umidade)) {
     Serial.println(F("Erro na leitura de umidade!"));
   } else {
-    Serial.print(F("Umidade: "));
-    Serial.print(event.relative_humidity);
-    Serial.println(F("%"));
+    // SERIAL PLOTTER
+    Serial.println(umidade); 
 
-    // Verifica a condição para ligar/desligar a luz
-    if (event.relative_humidity < 40.0) {
-      digitalWrite(RELAY_PIN, HIGH);  // Liga a luz 
-      Serial.println(F("Umidade abaixo de 40%. Luz LED LIGADA."));
+    // Lógica de irrigação
+    if (umidade < 40.0) {
+      digitalWrite(RELAY_PIN, HIGH); // Liga a irrigação
     } else {
-      digitalWrite(RELAY_PIN, LOW); // Desliga a luz 
-      Serial.println(F("Umidade acima ou igual a 40%. Luz LED DESLIGADA."));
+      digitalWrite(RELAY_PIN, LOW);  // Desliga a irrigação
     }
-  }
-  // Mostra a umidade no display
-   lcd.setCursor(1, 0); 
+
+
+    lcd.setCursor(0, 0);
     lcd.print("Umid: ");
-    lcd.print(event.relative_humidity);
-    lcd.print("%");
+    lcd.print(umidade, 1);
+    lcd.print("% ");
+  }
 
-  delay(1000);
-
-  // Lê a temperatura
   dht.temperature().getEvent(&event);
-  if (isnan(event.temperature)) {
+  float temperatura = event.temperature;
+
+  if (isnan(temperatura)) {
     Serial.println(F("Erro na leitura de temperatura!"));
   } else {
-    Serial.print(F("Temperatura: "));
-    Serial.print(event.temperature);
-    Serial.println(F("°C"));
+    lcd.setCursor(0, 1);
+    lcd.print("Temp: ");
+    lcd.print(temperatura, 1);
+    lcd.print((char)223); // Caractere de grau °
+    lcd.print("C");
   }
-  //Mostra a temperatura no display    
-    lcd.setCursor(1, 1); 
-     lcd.print("Temp: ");
-     lcd.print(event.temperature);
-     lcd.print("°C");
 
-  delay(3000);
+  delay(2000);
   lcd.clear();
 
+  //  Leitura de Nutrientes (Botões)
+  bool fosforo_presente = (digitalRead(P_PIN) == LOW);
+  bool potassio_presente = (digitalRead(K_PIN) == LOW);
 
-  //Funcionamento dos botões para leitura de Fosforo e Potassio
-  while (digitalRead(P) == LOW) {
-	  Serial.println(F("Fosforo presente"));}
-  while (digitalRead(K) == LOW) {
-	  Serial.println(F("Potassio presente"));}
- 
-    // Mostra a presença de fósforo e potássio
-    lcd.setCursor(1, 0); 
-     lcd.print("Fosforo: ");
-    if (digitalRead(P) == LOW)
-      lcd.print("Pres.");
-    else
-      lcd.print("Aus.");
+  if (fosforo_presente) Serial.println(F("Fosforo presente"));
+  if (potassio_presente) Serial.println(F("Potassio presente"));
+  
+  lcd.setCursor(0, 0);
+  lcd.print("Fosforo: ");
+  lcd.print(fosforo_presente ? "PRES" : "AUS ");
+  
+  lcd.setCursor(0, 1);
+  lcd.print("Potassio: ");
+  lcd.print(potassio_presente ? "PRES" : "AUS ");
 
-    lcd.setCursor(1, 1);
-     lcd.print("Potassio: ");
-    if (digitalRead(K) == LOW)
-      lcd.print("Pres.");
-    else
-      lcd.print("Aus."); 
+  delay(2000);
+  lcd.clear();
 
-   delay(3000);  
-   lcd.clear();
- 
-      
-  // Leitura de pH
-    int ldrValue = analogRead(pH);
+  // Leitura de pH (LDR simulando)
+  uint16_t ldrValue = analogRead(PH_PIN);
+  
+  // Mapeamento simples para uma escala de pH (0-14) para demonstração
+  // O valor 4095 do ADC será mapeado para 14.
+  float phValue = map(ldrValue, 0, 4095, 0, 140) / 10.0;
+  
   Serial.print("pH: ");
-  Serial.println(ldrValue); 
-
-  // Mostra a leitura de pH no display
-  lcd.setCursor(1, 0); 
-     lcd.print("pH: ");
-     lcd.print(ldrValue);
-     
-  delay(3000);
-
+  Serial.println(phValue);
+  
+  lcd.setCursor(0, 0);
+  lcd.print("pH do Solo:");
+  lcd.setCursor(0, 1);
+  lcd.print(phValue, 1);
+  
+  delay(2000);
   lcd.clear();
- 
-  }
+}
